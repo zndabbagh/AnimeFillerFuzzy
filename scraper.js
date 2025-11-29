@@ -16,20 +16,26 @@ function parseFillerEpisodes(html) {
     const filler = [];
     const mixed = [];
     
-    // Match the filler episode sections
-    const fillerMatch = html.match(/Filler Episodes?:([\s\S]*?)(?:<\/div>|Mixed Canon)/i);
-    const mixedMatch = html.match(/Mixed Canon\/Filler Episodes?:([\s\S]*?)<\/div>/i);
+    // NEW: More robust parsing for filler episodes
+    // Look for the filler episodes section more carefully
+    const fillerRegex = /<div[^>]*>\s*Filler Episodes?:\s*([\d\s,\-]+)/i;
+    const mixedRegex = /<div[^>]*>\s*Mixed Canon\/Filler Episodes?:\s*([\d\s,\-]+)/i;
+    
+    const fillerMatch = html.match(fillerRegex);
+    const mixedMatch = html.match(mixedRegex);
     
     if (fillerMatch) {
         const episodeText = fillerMatch[1];
         const episodes = parseEpisodeRanges(episodeText);
         filler.push(...episodes);
+        console.log(`  Found ${episodes.length} filler episodes`);
     }
     
     if (mixedMatch) {
         const episodeText = mixedMatch[1];
         const episodes = parseEpisodeRanges(episodeText);
         mixed.push(...episodes);
+        console.log(`  Found ${episodes.length} mixed episodes`);
     }
     
     return { filler, mixed };
@@ -37,7 +43,9 @@ function parseFillerEpisodes(html) {
 
 function parseEpisodeRanges(text) {
     const episodes = [];
-    const ranges = text.match(/\d+(?:-\d+)?/g) || [];
+    // Clean up the text - remove any HTML tags and extra whitespace
+    const cleanText = text.replace(/<[^>]*>/g, '').trim();
+    const ranges = cleanText.match(/\d+(?:-\d+)?/g) || [];
     
     for (const range of ranges) {
         if (range.includes('-')) {
