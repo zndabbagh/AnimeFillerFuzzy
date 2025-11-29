@@ -1,4 +1,4 @@
-const { addonBuilder } = require('stremio-addon-sdk');
+const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const express = require('express');
 const fs = require('fs').promises;
 const { getAbsoluteEpisode, getAnimeName } = require('./episode-mapper');
@@ -57,7 +57,6 @@ function getFallbackData() {
 // Get filler status for an episode
 async function getFillerStatus(imdbId, season, episode) {
     try {
-        // Get anime name from IMDB ID
         const animeInfo = await getAnimeName(imdbId);
         if (!animeInfo) {
             console.log(`Could not find anime info for ${imdbId}`);
@@ -66,14 +65,12 @@ async function getFillerStatus(imdbId, season, episode) {
         
         console.log(`Anime: ${animeInfo.name}`);
         
-        // Find matching anime in filler database
         const animeKey = await getAnimeMapping(imdbId, animeInfo.name, fillerDatabase);
         if (!animeKey || !fillerDatabase[animeKey]) {
             console.log(`No filler data found for ${animeInfo.name}`);
             return null;
         }
         
-        // Get absolute episode number
         const absoluteEpisode = await getAbsoluteEpisode(imdbId, season, episode);
         if (!absoluteEpisode) {
             console.log(`Could not calculate absolute episode for S${season}E${episode}`);
@@ -82,7 +79,6 @@ async function getFillerStatus(imdbId, season, episode) {
         
         const animeData = fillerDatabase[animeKey];
         
-        // Check filler status
         if (animeData.filler && animeData.filler.includes(absoluteEpisode)) {
             return 'filler';
         } else if (animeData.mixed && animeData.mixed.includes(absoluteEpisode)) {
@@ -151,6 +147,9 @@ async function start() {
     await loadFillerDatabase();
     
     const port = process.env.PORT || 7000;
+    const interface = builder.getInterface();
+    
+    // Create custom express app
     const app = express();
     
     const landingHTML = `
@@ -248,7 +247,6 @@ async function start() {
                 const { scrapeAll } = require('./scraper');
                 await scrapeAll();
                 
-                // Reload the database
                 await loadFillerDatabase();
                 
                 console.log('\n✅ Manual scrape completed successfully!\n');
@@ -260,30 +258,16 @@ async function start() {
         }, 1000);
     });
     
-    // Addon routes
-    const addonInterface = builder.getInterface();
-    app.get('/manifest.json', (req, res) => {
-        res.setHeader('Content-Type', 'application/json');
-        res.send(addonInterface.manifest);
+    // Use the addon server from SDK
+    serveHTTP(interface, { 
+        port,
+        getRouter: () => app
     });
     
-    app.get('/stream/:type/:id.json', async (req, res) => {
-        const handler = addonInterface.handlers.stream;
-        if (handler) {
-            const result = await handler(req.params);
-            res.setHeader('Content-Type', 'application/json');
-            res.send(result);
-        } else {
-            res.status(404).send({ streams: [] });
-        }
-    });
-    
-    app.listen(port, () => {
-        console.log(`\n🎬 Anime Filler Info addon running on port ${port}`);
-        console.log(`📊 Loaded filler data for ${Object.keys(fillerDatabase).length} anime`);
-        console.log(`🌐 Access at: ${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + port}`);
-        console.log(`🔄 Trigger scraper at: ${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + port}/trigger-scrape\n`);
-    });
+    console.log(`\n🎬 Anime Filler Info addon running on port ${port}`);
+    console.log(`📊 Loaded filler data for ${Object.keys(fillerDatabase).length} anime`);
+    console.log(`🌐 Access at: ${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + port}`);
+    console.log(`🔄 Trigger scraper at: ${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + port}/trigger-scrape\n`);
 }
 
 start().catch(console.error);
