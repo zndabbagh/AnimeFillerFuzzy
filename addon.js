@@ -55,23 +55,23 @@ function getFallbackData() {
 }
 
 // Get filler status for an episode
-async function getFillerStatus(imdbId, season, episode) {
+async function getFillerStatus(id, season, episode) {
     try {
-        const animeInfo = await getAnimeName(imdbId);
+        const animeInfo = await getAnimeName(id);
         if (!animeInfo) {
-            console.log(`Could not find anime info for ${imdbId}`);
+            console.log(`Could not find anime info for ${id}`);
             return null;
         }
         
         console.log(`Anime: ${animeInfo.name}`);
         
-        const animeKey = await getAnimeMapping(imdbId, animeInfo.name, fillerDatabase);
+        const animeKey = await getAnimeMapping(id, animeInfo.name, fillerDatabase);
         if (!animeKey || !fillerDatabase[animeKey]) {
             console.log(`No filler data found for ${animeInfo.name}`);
             return null;
         }
         
-        const absoluteEpisode = await getAbsoluteEpisode(imdbId, season, episode);
+        const absoluteEpisode = await getAbsoluteEpisode(id, season, episode);
         if (!absoluteEpisode) {
             console.log(`Could not calculate absolute episode for S${season}E${episode}`);
             return null;
@@ -102,13 +102,23 @@ builder.defineStreamHandler(async ({ type, id }) => {
     }
     
     const parts = id.split(':');
-    if (parts.length < 3) {
+    if (parts.length < 3 && !id.startsWith('kitsu:')) {
         return { streams: [] };
     }
     
-    const seriesId = parts[0];
-    const season = parseInt(parts[1]);
-    const episode = parseInt(parts[2]);
+    let seriesId, season, episode;
+    
+    // Handle Kitsu IDs - format is kitsu:ID:episode (no season)
+    if (id.startsWith('kitsu:')) {
+        seriesId = `kitsu:${parts[1]}`; // kitsu:12345
+        season = 1; // Kitsu doesn't use seasons
+        episode = parseInt(parts[2]);
+    } else {
+        // Handle IMDB IDs - format is tt123456:season:episode
+        seriesId = parts[0];
+        season = parseInt(parts[1]);
+        episode = parseInt(parts[2]);
+    }
     
     console.log(`Parsed: ${seriesId} S${season}E${episode}`);
     
