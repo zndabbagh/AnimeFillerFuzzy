@@ -1,0 +1,22 @@
+{
+  "name": "anime-filler-addon",
+  "version": "2.0.0",
+  "description": "Stremio addon that automatically detects filler episodes for any anime",
+  "main": "addon.js",
+  "scripts": {
+    "start": "node addon.js",
+    "scrape": "node scraper.js",
+    "test": "node test-matcher.js"
+  },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.9",
+    "node-cron": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zndabbagh/Animefiller"
+  }
+}
