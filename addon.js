@@ -17,6 +17,7 @@ const manifest = {
 const builder = new addonBuilder(manifest);
 
 let fillerDatabase = {};
+let isScraperRunning = false;
 
 // Load filler database on startup
 async function loadFillerDatabase() {
@@ -139,14 +140,139 @@ builder.defineStreamHandler(async ({ type, id }) => {
     };
 });
 
+// Manual scraper trigger endpoint
+async function setupScraperEndpoint(addonInterface) {
+    const landingHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Anime Filler Info</title>
+            <style>
+                body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; }
+                h1 { color: #333; }
+                .button { 
+                    display: inline-block;
+                    padding: 15px 30px;
+                    background: #4CAF50;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    margin: 10px 5px;
+                }
+                .button:hover { background: #45a049; }
+                .warning { background: #ff9800; }
+                .info { background: #2196F3; }
+                .status { 
+                    padding: 20px;
+                    background: #f0f0f0;
+                    border-radius: 5px;
+                    margin: 20px 0;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>🎬 Anime Filler Info Addon</h1>
+            <div class="status">
+                <h3>Current Status:</h3>
+                <p>📊 Anime in database: ${Object.keys(fillerDatabase).length}</p>
+                <p>🔄 Scraper status: ${isScraperRunning ? 'Running...' : 'Idle'}</p>
+            </div>
+            
+            <h3>Quick Actions:</h3>
+            <a href="/trigger-scrape" class="button warning">🔄 Trigger Manual Scrape</a>
+            <a href="/manifest.json" class="button info">📄 View Manifest</a>
+            
+            <h3>Install in Stremio:</h3>
+            <p>Copy this URL and paste it in Stremio's "Install from URL":</p>
+            <code style="background: #f0f0f0; padding: 10px; display: block;">${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + (process.env.PORT || 7000)}/manifest.json</code>
+            
+            <h3>How It Works:</h3>
+            <p>This addon automatically detects filler episodes in anime using data from AnimeFillerList.com</p>
+            <p>The scraper runs automatically every Sunday at 3 AM, or you can trigger it manually above.</p>
+            
+            <p style="margin-top: 40px; color: #999;">Scraping takes 10-15 minutes. Check logs for progress.</p>
+        </body>
+        </html>
+    `;
+    
+    // Wrap the addon interface with custom routes
+    const express = require('express');
+    const addonApp = express();
+    
+    // Landing page
+    addonApp.get('/', (req, res) => {
+        res.send(landingHTML);
+    });
+    
+    // Trigger scraper endpoint
+    addonApp.get('/trigger-scrape', async (req, res) => {
+        if (isScraperRunning) {
+            res.send(`
+                <html>
+                <head><title>Scraper Running</title></head>
+                <body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
+                    <h2>⚠️ Scraper Already Running</h2>
+                    <p>The scraper is already in progress. Please wait for it to complete.</p>
+                    <a href="/" style="color: #2196F3;">← Back to Home</a>
+                </body>
+                </html>
+            `);
+            return;
+        }
+        
+        res.send(`
+            <html>
+            <head><title>Scrape Started</title></head>
+            <body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
+                <h2>✅ Scraping Started!</h2>
+                <p>The scraper is now running in the background.</p>
+                <p>This will take approximately <strong>10-15 minutes</strong>.</p>
+                <p>Check the Render logs to see progress.</p>
+                <a href="/" style="color: #2196F3;">← Back to Home</a>
+            </body>
+            </html>
+        `);
+        
+        // Run scraper in background
+        setTimeout(async () => {
+            isScraperRunning = true;
+            try {
+                console.log('\n🔄 Manual scrape triggered via web endpoint...\n');
+                const { scrapeAll } = require('./scraper');
+                await scrapeAll();
+                
+                // Reload the database
+                await loadFillerDatabase();
+                
+                console.log('\n✅ Manual scrape completed successfully!\n');
+                isScraperRunning = false;
+            } catch (error) {
+                console.error('\n❌ Manual scrape failed:', error);
+                isScraperRunning = false;
+            }
+        }, 1000);
+    });
+    
+    // Mount the original addon interface
+    addonApp.use(addonInterface);
+    
+    return addonApp;
+}
+
 // Initialize and start server
 async function start() {
     await loadFillerDatabase();
     
     const port = process.env.PORT || 7000;
-    serveHTTP(builder.getInterface(), { port });
-    console.log(`\n🎬 Anime Filler Info addon running on port ${port}`);
-    console.log(`📊 Loaded filler data for ${Object.keys(fillerDatabase).length} anime\n`);
+    const addonInterface = builder.getInterface();
+    const app = await setupScraperEndpoint(addonInterface);
+    
+    app.listen(port, () => {
+        console.log(`\n🎬 Anime Filler Info addon running on port ${port}`);
+        console.log(`📊 Loaded filler data for ${Object.keys(fillerDatabase).length} anime`);
+        console.log(`🌐 Access at: ${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + port}`);
+        console.log(`🔄 Trigger scraper at: ${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + port}/trigger-scrape\n`);
+    });
 }
 
 start().catch(console.error);
