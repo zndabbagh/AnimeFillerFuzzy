@@ -5,18 +5,19 @@
   "main": "addon.js",
   "scripts": {
     "start": "node addon.js",
-    "scrape": "node scraper.js",
-    "test": "node test-matcher.js"
+    "scrape": "node run-scraper.js",
+    "scrape-and-start": "node run-scraper.js && node addon.js"
   },
   "dependencies": {
     "stremio-addon-sdk": "^1.6.9",
-    "node-cron": "^3.0.2"
+    "node-cron": "^3.0.2",
+    "express": "^4.18.2"
   },
   "engines": {
     "node": ">=14.0.0"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/zndabbagh/Animefiller"
+    "url": "https://github.com/zndabbagh/AnimeFillerFuzzy"
   }
 }
