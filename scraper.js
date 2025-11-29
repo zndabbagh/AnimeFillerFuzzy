@@ -1,7 +1,6 @@
 const https = require('https');
 const fs = require('fs').promises;
 
-// Scrape AnimeFillerList.com for all anime filler data
 async function fetchPage(url) {
     return new Promise((resolve, reject) => {
         https.get(url, (res) => {
@@ -16,56 +15,89 @@ function parseFillerEpisodes(html) {
     const filler = [];
     const mixed = [];
     
-    // NEW: More robust parsing for filler episodes
-    // Look for the filler episodes section more carefully
-    const fillerRegex = /<div[^>]*>\s*Filler Episodes?:\s*([\d\s,\-]+)/i;
-    const mixedRegex = /<div[^>]*>\s*Mixed Canon\/Filler Episodes?:\s*([\d\s,\-]+)/i;
+    // Look for episode tables in the HTML
+    // AnimeFillerList uses specific formatting - look for the exact text
+    const lines = html.split('\n');
     
-    const fillerMatch = html.match(fillerRegex);
-    const mixedMatch = html.match(mixedRegex);
+    let inFillerSection = false;
+    let inMixedSection = false;
     
-    if (fillerMatch) {
-        const episodeText = fillerMatch[1];
-        const episodes = parseEpisodeRanges(episodeText);
-        filler.push(...episodes);
-        console.log(`  Found ${episodes.length} filler episodes`);
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Check for section headers
+        if (line.includes('Filler Episodes') && !line.includes('Mixed')) {
+            inFillerSection = true;
+            inMixedSection = false;
+            // Get the episode numbers from this line or next few lines
+            const episodeText = extractEpisodes(lines, i);
+            if (episodeText) {
+                filler.push(...parseEpisodeRanges(episodeText));
+            }
+        } else if (line.includes('Mixed Canon/Filler Episodes')) {
+            inMixedSection = true;
+            inFillerSection = false;
+            // Get the episode numbers from this line or next few lines
+            const episodeText = extractEpisodes(lines, i);
+            if (episodeText) {
+                mixed.push(...parseEpisodeRanges(episodeText));
+            }
+        }
     }
     
-    if (mixedMatch) {
-        const episodeText = mixedMatch[1];
-        const episodes = parseEpisodeRanges(episodeText);
-        mixed.push(...episodes);
-        console.log(`  Found ${episodes.length} mixed episodes`);
-    }
-    
+    console.log(`  Found ${filler.length} filler episodes, ${mixed.length} mixed episodes`);
     return { filler, mixed };
+}
+
+function extractEpisodes(lines, startIndex) {
+    // Look at the current line and next 3 lines for episode numbers
+    let episodeText = '';
+    for (let i = 0; i < 4 && (startIndex + i) < lines.length; i++) {
+        episodeText += ' ' + lines[startIndex + i];
+    }
+    
+    // Remove HTML tags
+    episodeText = episodeText.replace(/<[^>]*>/g, ' ');
+    
+    // Find the part with episode numbers (after the colon)
+    const colonIndex = episodeText.indexOf(':');
+    if (colonIndex !== -1) {
+        episodeText = episodeText.substring(colonIndex + 1);
+    }
+    
+    return episodeText;
 }
 
 function parseEpisodeRanges(text) {
     const episodes = [];
-    // Clean up the text - remove any HTML tags and extra whitespace
-    const cleanText = text.replace(/<[^>]*>/g, '').trim();
-    const ranges = cleanText.match(/\d+(?:-\d+)?/g) || [];
+    // Match patterns like "1-5", "10", "20-25"
+    const ranges = text.match(/\d+(?:-\d+)?/g) || [];
     
     for (const range of ranges) {
         if (range.includes('-')) {
             const [start, end] = range.split('-').map(Number);
-            for (let i = start; i <= end; i++) {
-                episodes.push(i);
+            if (!isNaN(start) && !isNaN(end) && start <= end) {
+                for (let i = start; i <= end; i++) {
+                    if (!episodes.includes(i)) {
+                        episodes.push(i);
+                    }
+                }
             }
         } else {
-            episodes.push(Number(range));
+            const num = Number(range);
+            if (!isNaN(num) && !episodes.includes(num)) {
+                episodes.push(num);
+            }
         }
     }
     
-    return episodes;
+    return episodes.sort((a, b) => a - b);
 }
 
 async function getAnimeList() {
     console.log('Fetching anime list from AnimeFillerList...');
     const html = await fetchPage('https://www.animefillerlist.com/shows');
     
-    // Extract all anime show links
     const animeLinks = [];
     const linkRegex = /<a href="\/shows\/([^"]+)">([^<]+)<\/a>/g;
     let match;
@@ -87,7 +119,6 @@ async function scrapeAnime(slug, name) {
         const html = await fetchPage(`https://www.animefillerlist.com/shows/${slug}`);
         const fillerData = parseFillerEpisodes(html);
         
-        // Normalize the name for use as a key
         const key = slug.toLowerCase().replace(/[^a-z0-9]+/g, '-');
         
         return {
@@ -108,7 +139,6 @@ async function scrapeAll() {
     const animeList = await getAnimeList();
     const fillerDatabase = {};
     
-    // Scrape in batches to avoid overwhelming the server
     const batchSize = 5;
     for (let i = 0; i < animeList.length; i += batchSize) {
         const batch = animeList.slice(i, i + batchSize);
@@ -126,12 +156,10 @@ async function scrapeAll() {
             }
         }
         
-        // Rate limiting
         await new Promise(resolve => setTimeout(resolve, 2000));
         console.log(`Progress: ${Math.min(i + batchSize, animeList.length)}/${animeList.length}`);
     }
     
-    // Save to file
     await fs.writeFile(
         'filler-data.json',
         JSON.stringify(fillerDatabase, null, 2)
@@ -141,7 +169,6 @@ async function scrapeAll() {
     return fillerDatabase;
 }
 
-// Run if called directly
 if (require.main === module) {
     scrapeAll().catch(console.error);
 }
