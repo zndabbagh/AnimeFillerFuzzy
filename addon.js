@@ -1,4 +1,5 @@
-const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
+const { addonBuilder } = require('stremio-addon-sdk');
+const express = require('express');
 const fs = require('fs').promises;
 const { getAbsoluteEpisode, getAnimeName } = require('./episode-mapper');
 const { getAnimeMapping } = require('./anime-matcher');
@@ -43,6 +44,11 @@ function getFallbackData() {
         'detective-conan': {
             name: 'Detective Conan',
             filler: [6,14,17,19,21,24,25,26,29,30,33,36,37,41,44,45,47,51,53,55,56,59,61,62,64,65,66,67,71,73,74,79,80,83,87,88,89,90,92,93,94,95,97,106,107,108,109,110,111,119,120,123,124,125,126,127,135,140,143,148,149,150,151,152,155,158,159,160,161,165,169,175,179,180,181,182,183,184,185,186,187,196,197,198,201,202,203,204,207,208,209,210,211,214,215,216,225,232,235,236,237,245,248,251,252,255,256,257,260,261,262,264,265,273,276,281,282,283],
+            mixed: []
+        },
+        'bleach': {
+            name: 'Bleach',
+            filler: [33, 50, 64, 65, 66, 67, 68, 69, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 355],
             mixed: []
         }
     };
@@ -140,8 +146,13 @@ builder.defineStreamHandler(async ({ type, id }) => {
     };
 });
 
-// Manual scraper trigger endpoint
-async function setupScraperEndpoint(addonInterface) {
+// Initialize and start server
+async function start() {
+    await loadFillerDatabase();
+    
+    const port = process.env.PORT || 7000;
+    const app = express();
+    
     const landingHTML = `
         <!DOCTYPE html>
         <html>
@@ -184,7 +195,7 @@ async function setupScraperEndpoint(addonInterface) {
             
             <h3>Install in Stremio:</h3>
             <p>Copy this URL and paste it in Stremio's "Install from URL":</p>
-            <code style="background: #f0f0f0; padding: 10px; display: block;">${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + (process.env.PORT || 7000)}/manifest.json</code>
+            <code style="background: #f0f0f0; padding: 10px; display: block;">${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + port}/manifest.json</code>
             
             <h3>How It Works:</h3>
             <p>This addon automatically detects filler episodes in anime using data from AnimeFillerList.com</p>
@@ -195,17 +206,13 @@ async function setupScraperEndpoint(addonInterface) {
         </html>
     `;
     
-    // Wrap the addon interface with custom routes
-    const express = require('express');
-    const addonApp = express();
-    
     // Landing page
-    addonApp.get('/', (req, res) => {
+    app.get('/', (req, res) => {
         res.send(landingHTML);
     });
     
     // Trigger scraper endpoint
-    addonApp.get('/trigger-scrape', async (req, res) => {
+    app.get('/trigger-scrape', async (req, res) => {
         if (isScraperRunning) {
             res.send(`
                 <html>
@@ -253,19 +260,23 @@ async function setupScraperEndpoint(addonInterface) {
         }, 1000);
     });
     
-    // Mount the original addon interface
-    addonApp.use(addonInterface);
-    
-    return addonApp;
-}
-
-// Initialize and start server
-async function start() {
-    await loadFillerDatabase();
-    
-    const port = process.env.PORT || 7000;
+    // Addon routes
     const addonInterface = builder.getInterface();
-    const app = await setupScraperEndpoint(addonInterface);
+    app.get('/manifest.json', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.send(addonInterface.manifest);
+    });
+    
+    app.get('/stream/:type/:id.json', async (req, res) => {
+        const handler = addonInterface.handlers.stream;
+        if (handler) {
+            const result = await handler(req.params);
+            res.setHeader('Content-Type', 'application/json');
+            res.send(result);
+        } else {
+            res.status(404).send({ streams: [] });
+        }
+    });
     
     app.listen(port, () => {
         console.log(`\n🎬 Anime Filler Info addon running on port ${port}`);
