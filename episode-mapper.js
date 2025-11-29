@@ -22,6 +22,60 @@ async function tmdbFetch(path) {
     });
 }
 
+// Fetch data from Kitsu API
+async function kitsuFetch(path) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: 'kitsu.io',
+            path: `/api/edge${path}`,
+            headers: {
+                'Accept': 'application/vnd.api+json',
+                'Content-Type': 'application/vnd.api+json'
+            }
+        };
+        
+        https.get(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        }).on('error', reject);
+    });
+}
+
+// Get anime info from Kitsu ID
+async function kitsuToAnime(kitsuId) {
+    const cacheKey = `kitsu_${kitsuId}`;
+    if (cache.has(cacheKey)) {
+        return cache.get(cacheKey);
+    }
+    
+    try {
+        const data = await kitsuFetch(`/anime/${kitsuId}`);
+        const anime = data.data;
+        
+        if (anime) {
+            const result = {
+                name: anime.attributes.canonicalTitle,
+                originalName: anime.attributes.titles?.en_jp || anime.attributes.titles?.ja_jp,
+                episodeCount: anime.attributes.episodeCount,
+                kitsuId: kitsuId
+            };
+            cache.set(cacheKey, result);
+            return result;
+        }
+    } catch (error) {
+        console.error(`Error fetching Kitsu data for ${kitsuId}:`, error.message);
+    }
+    
+    return null;
+}
+
 // Convert IMDB ID to TMDB ID
 async function imdbToTmdb(imdbId) {
     const cacheKey = `imdb_${imdbId}`;
@@ -62,10 +116,16 @@ async function getSeasonDetails(tmdbId, seasonNumber) {
 }
 
 // Calculate absolute episode number
-async function getAbsoluteEpisode(imdbId, season, episode) {
-    const tvShow = await imdbToTmdb(imdbId);
+async function getAbsoluteEpisode(id, season, episode) {
+    // Handle Kitsu IDs differently - they use absolute numbering already
+    if (id.startsWith('kitsu:')) {
+        // Kitsu format is kitsu:ID:episode
+        return episode;
+    }
+    
+    const tvShow = await imdbToTmdb(id);
     if (!tvShow) {
-        console.log(`Could not find TMDB data for ${imdbId}`);
+        console.log(`Could not find TMDB data for ${id}`);
         return null;
     }
     
@@ -82,13 +142,28 @@ async function getAbsoluteEpisode(imdbId, season, episode) {
     // Add current episode number
     absoluteEpisode += episode;
     
-    console.log(`${imdbId} S${season}E${episode} = Absolute Episode ${absoluteEpisode}`);
+    console.log(`${id} S${season}E${episode} = Absolute Episode ${absoluteEpisode}`);
     return absoluteEpisode;
 }
 
-// Get anime name from IMDB ID
-async function getAnimeName(imdbId) {
-    const tvShow = await imdbToTmdb(imdbId);
+// Get anime name from ID (IMDB or Kitsu)
+async function getAnimeName(id) {
+    // Handle Kitsu IDs
+    if (id.startsWith('kitsu:')) {
+        const kitsuId = id.split(':')[1];
+        const anime = await kitsuToAnime(kitsuId);
+        if (!anime) {
+            return null;
+        }
+        return {
+            name: anime.name,
+            originalName: anime.originalName,
+            kitsuId: kitsuId
+        };
+    }
+    
+    // Handle IMDB IDs
+    const tvShow = await imdbToTmdb(id);
     if (!tvShow) {
         return null;
     }
@@ -100,26 +175,9 @@ async function getAnimeName(imdbId) {
     };
 }
 
-// For anime, try to get the absolute episode number directly from episode data
-async function getEpisodeAbsoluteNumber(tmdbId, season, episode) {
-    const seasonData = await getSeasonDetails(tmdbId, season);
-    if (!seasonData || !seasonData.episodes) {
-        return null;
-    }
-    
-    const episodeData = seasonData.episodes.find(ep => ep.episode_number === episode);
-    
-    // Some anime have absolute_episode_number in the data
-    if (episodeData && episodeData.absolute_episode_number) {
-        return episodeData.absolute_episode_number;
-    }
-    
-    return null;
-}
-
 module.exports = {
     getAbsoluteEpisode,
     getAnimeName,
-    getEpisodeAbsoluteNumber,
-    imdbToTmdb
+    imdbToTmdb,
+    kitsuToAnime
 };
